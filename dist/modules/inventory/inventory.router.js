@@ -1,0 +1,20 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+const express_1 = require("express");
+const inventory_controller_1 = require("./inventory.controller");
+const auth_middleware_1 = require("../../middleware/auth.middleware");
+const rbac_middleware_1 = require("../../middleware/rbac.middleware");
+const validation_middleware_1 = require("../../middleware/validation.middleware");
+const inventory_dto_1 = require("./inventory.dto");
+const audit_middleware_1 = require("../../middleware/audit.middleware");
+const router = (0, express_1.Router)();
+router.use(auth_middleware_1.authenticate);
+router.get('/summary', inventory_controller_1.InventoryController.getSummary);
+router.get('/lots', inventory_controller_1.InventoryController.getLots);
+router.get('/diamonds', inventory_controller_1.InventoryController.getSingleDiamonds);
+router.post('/lots', (0, rbac_middleware_1.requirePermission)('INVENTORY_MANAGE'), (0, validation_middleware_1.validateRequest)({ body: inventory_dto_1.createLotSchema }), (0, audit_middleware_1.auditLogger)('diamond_lots'), inventory_controller_1.InventoryController.createLot);
+router.post('/diamonds', (0, rbac_middleware_1.requirePermission)('INVENTORY_MANAGE'), (0, validation_middleware_1.validateRequest)({ body: inventory_dto_1.createSingleDiamondSchema }), (0, audit_middleware_1.auditLogger)('single_diamonds'), inventory_controller_1.InventoryController.createSingleDiamond);
+router.post('/lots/breakdown', (0, rbac_middleware_1.requirePermission)('INVENTORY_MANAGE'), (0, validation_middleware_1.validateRequest)({ body: inventory_dto_1.lotBreakdownSchema }), (0, audit_middleware_1.auditLogger)('lot_breakdown_history'), inventory_controller_1.InventoryController.breakdownLot);
+router.post('/audit', (0, rbac_middleware_1.requirePermission)('STOCK_AUDIT'), (0, validation_middleware_1.validateRequest)({ body: inventory_dto_1.stockAuditSchema }), (0, audit_middleware_1.auditLogger)('stock_audit_logs'), inventory_controller_1.InventoryController.stockAudit);
+exports.default = router;
+//# sourceMappingURL=inventory.router.js.map
