@@ -3,7 +3,12 @@ import { AppError } from '../../middleware/error.middleware';
 import { kafkaService, KafkaTopics } from '../../config/kafka';
 
 export class SalesService {
-  public static async getAllSalesOrders(filters?: { buyer_id?: string; deal_status?: string }) {
+  public static async getAllSalesOrders(filters?: {
+    buyer_id?: string;
+    deal_status?: string;
+    user_id?: string;
+    organization_id?: string;
+  }) {
     let query = db('sales_orders')
       .join('parties as buyer', 'sales_orders.buyer_id', 'buyer.id')
       .leftJoin('brokers', 'sales_orders.broker_id', 'brokers.id')
@@ -17,6 +22,8 @@ export class SalesService {
 
     if (filters?.buyer_id) query = query.where('sales_orders.buyer_id', filters.buyer_id);
     if (filters?.deal_status) query = query.where('sales_orders.deal_status', filters.deal_status);
+    if (filters?.user_id) query = query.where('sales_orders.created_by_user_id', filters.user_id);
+    if (filters?.organization_id) query = query.where('sales_orders.organization_id', filters.organization_id);
 
     const orders = await query.orderBy('sales_orders.created_at', 'desc');
 
@@ -172,6 +179,225 @@ export class SalesService {
 
       return salesOrder;
     });
+  }
+
+  public static async getMyStats() {
+    const today = new Date().toISOString().split('T')[0];
+    const monthStart = today.substring(0, 7) + '-01';
+
+    const [todayStats, monthStats, pendingStats] = await Promise.all([
+      db('sales_orders').where('created_at', '>=', today).select(
+        db.raw('COUNT(*) as count'),
+        db.raw('COALESCE(SUM(net_amount), 0) as total')
+      ).first(),
+      db('sales_orders').where('created_at', '>=', monthStart).select(
+        db.raw('COUNT(*) as count'),
+        db.raw('COALESCE(SUM(net_amount), 0) as total')
+      ).first(),
+      db('sales_orders').whereNotIn('deal_status', ['PAID', 'SETTLED', 'CANCELLED']).select(
+        db.raw('COALESCE(SUM(net_amount), 0) as total')
+      ).first()
+    ]);
+
+    return {
+      today_count: Number(todayStats?.count || 0),
+      today_amount: Number(todayStats?.total || 0),
+      month_count: Number(monthStats?.count || 0),
+      month_amount: Number(monthStats?.total || 0),
+      total_pending: Number(pendingStats?.total || 0)
+    };
+  }
+
+  public static async markPaymentComplete(salesOrderId: string, userId: string) {
+    return await db.transaction(async (trx) => {
+      const order = await trx('sales_orders').where({ id: salesOrderId }).first();
+      if (!order) throw new AppError('Sales order not found', 404, 'NOT_FOUND');
+      if (order.deal_status === 'PAID') throw new AppError('Invoice already marked as paid', 409, 'ALREADY_PAID');
+
+      const amountDue = Number(order.net_amount);
+
+      // Mark sales order as PAID
+      await trx('sales_orders').where({ id: salesOrderId }).update({ deal_status: 'PAID' });
+
+      // Mark all pending payment schedules as PAID
+      await trx('payment_schedules')
+        .where({ sales_order_id: salesOrderId })
+        .whereIn('status', ['PENDING', 'OVERDUE', 'PARTIAL'])
+        .update({ status: 'PAID', paid_at: trx.fn.now() });
+
+      // Credit party ledger
+      const lastLedger = await trx('party_ledgers')
+        .where({ party_id: order.buyer_id })
+        .orderBy('created_at', 'desc')
+        .first();
+      const previousBalance = lastLedger ? Number(lastLedger.running_balance) : 0;
+      const newBalance = previousBalance - amountDue;
+
+      await trx('party_ledgers').insert({
+        party_id: order.buyer_id,
+        entry_type: 'CREDIT',
+        amount: amountDue,
+        reference_type: 'PAYMENT_RECEIPT',
+        reference_id: salesOrderId,
+        running_balance: newBalance,
+        remarks: `Full payment received for Invoice #${order.invoice_number}`
+      });
+
+      // Emit Kafka event
+      await kafkaService.emit(KafkaTopics.PAYMENT_DUE_ALERT, {
+        event: 'PAYMENT_COMPLETED',
+        sales_order_id: salesOrderId,
+        invoice_number: order.invoice_number,
+        amount: amountDue,
+        user_id: userId
+      });
+
+      return { invoice_number: order.invoice_number, amount_paid: amountDue, status: 'PAID' };
+    });
+  }
+
+  public static async recordPartialPayment(data: {
+    sales_order_id: string;
+    amount_received: number;
+    payment_mode: string;
+    payment_reference?: string;
+    next_promise_date?: string;
+    remarks?: string;
+    user_id: string;
+  }) {
+    return await db.transaction(async (trx) => {
+      const order = await trx('sales_orders').where({ id: data.sales_order_id }).first();
+      if (!order) throw new AppError('Sales order not found', 404, 'NOT_FOUND');
+      if (order.deal_status === 'PAID') throw new AppError('Invoice already fully paid', 409, 'ALREADY_PAID');
+
+      // Insert payment receipt
+      const [receipt] = await trx('payment_receipts').insert({
+        party_id: order.buyer_id,
+        sales_order_id: data.sales_order_id,
+        amount_received: data.amount_received,
+        payment_mode: data.payment_mode,
+        payment_reference: data.payment_reference || null,
+        received_at: trx.fn.now(),
+        remarks: data.remarks || null
+      }).returning('*');
+
+      // Credit party ledger
+      const lastLedger = await trx('party_ledgers')
+        .where({ party_id: order.buyer_id })
+        .orderBy('created_at', 'desc')
+        .first();
+      const previousBalance = lastLedger ? Number(lastLedger.running_balance) : 0;
+      const newBalance = previousBalance - data.amount_received;
+
+      await trx('party_ledgers').insert({
+        party_id: order.buyer_id,
+        entry_type: 'CREDIT',
+        amount: data.amount_received,
+        reference_type: 'PARTIAL_PAYMENT',
+        reference_id: receipt.id,
+        running_balance: newBalance,
+        remarks: `Partial receipt via ${data.payment_mode} for Invoice #${order.invoice_number}`
+      });
+
+      // Calculate total received so far
+      const receipts = await trx('payment_receipts').where({ sales_order_id: data.sales_order_id });
+      const totalReceived = receipts.reduce((sum: number, r: any) => sum + Number(r.amount_received), 0);
+      const netAmount = Number(order.net_amount);
+      const remaining = netAmount - totalReceived;
+
+      let newStatus = remaining <= 0 ? 'PAID' : 'PARTIAL';
+      await trx('sales_orders').where({ id: data.sales_order_id }).update({ deal_status: newStatus });
+
+      // Update payment schedule
+      if (data.next_promise_date && remaining > 0) {
+        await trx('payment_schedules')
+          .where({ sales_order_id: data.sales_order_id })
+          .whereIn('status', ['PENDING', 'OVERDUE', 'PARTIAL'])
+          .update({
+            status: 'PARTIAL',
+            amount_due: remaining,
+            due_date: data.next_promise_date,
+            promised_date: data.next_promise_date
+          });
+
+        // Schedule follow-up reminder via Kafka
+        await kafkaService.emit(KafkaTopics.PAYMENT_DUE_ALERT, {
+          event: 'PARTIAL_PAYMENT_RECEIVED',
+          sales_order_id: data.sales_order_id,
+          invoice_number: order.invoice_number,
+          amount_received: data.amount_received,
+          remaining: remaining,
+          next_promise_date: data.next_promise_date
+        });
+      }
+
+      return {
+        receipt_id: receipt.id,
+        amount_received: data.amount_received,
+        total_received: totalReceived,
+        remaining_balance: Math.max(0, remaining),
+        deal_status: newStatus
+      };
+    });
+  }
+
+  public static async reschedulePaymentDate(data: {
+    sales_order_id: string;
+    new_promised_date: string;
+    reason?: string;
+    user_id: string;
+  }) {
+    const order = await db('sales_orders').where({ id: data.sales_order_id }).first();
+    if (!order) throw new AppError('Sales order not found', 404, 'NOT_FOUND');
+
+    await db('payment_schedules')
+      .where({ sales_order_id: data.sales_order_id })
+      .whereIn('status', ['PENDING', 'OVERDUE', 'PARTIAL'])
+      .update({ promised_date: data.new_promised_date, status: 'PENDING' });
+
+    // Create a follow-up reminder for the promised date
+    await db('daily_reminders').insert({
+      party_id: order.buyer_id,
+      sales_order_id: data.sales_order_id,
+      reminder_date: data.new_promised_date,
+      reminder_type: 'PROMISED_DATE_FOLLOWUP',
+      message: `Payment promised for Invoice #${order.invoice_number} due on ${data.new_promised_date}. Reason: ${data.reason || 'Rescheduled by trader'}`,
+      status: 'PENDING'
+    });
+
+    // Emit Kafka notification
+    await kafkaService.emit(KafkaTopics.PAYMENT_DUE_ALERT, {
+      event: 'PAYMENT_RESCHEDULED',
+      sales_order_id: data.sales_order_id,
+      invoice_number: order.invoice_number,
+      buyer_id: order.buyer_id,
+      new_promised_date: data.new_promised_date,
+      reason: data.reason
+    });
+
+    return { invoice_number: order.invoice_number, new_promised_date: data.new_promised_date };
+  }
+
+  public static async getPaymentHistory(salesOrderId: string) {
+    const order = await db('sales_orders').where({ id: salesOrderId }).first();
+    if (!order) throw new AppError('Sales order not found', 404, 'NOT_FOUND');
+
+    const receipts = await db('payment_receipts')
+      .where({ sales_order_id: salesOrderId })
+      .orderBy('received_at', 'desc');
+
+    const totalReceived = receipts.reduce((sum: number, r: any) => sum + Number(r.amount_received), 0);
+    const remaining = Number(order.net_amount) - totalReceived;
+
+    return {
+      order_id: salesOrderId,
+      invoice_number: order.invoice_number,
+      net_amount: Number(order.net_amount),
+      total_received: totalReceived,
+      remaining_balance: Math.max(0, remaining),
+      deal_status: order.deal_status,
+      receipts
+    };
   }
 
   public static async getDebtorsAgeingAnalysis() {

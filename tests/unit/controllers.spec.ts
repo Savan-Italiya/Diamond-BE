@@ -68,6 +68,24 @@ describe('Controller Layer Unit Tests', () => {
       await PartiesController.update(req, res, next);
       expect(res.status).toHaveBeenCalledWith(200);
     });
+
+    it('should pass error to next on failure', async () => {
+      jest.spyOn(PartiesService, 'getAllParties').mockRejectedValue(new Error('fail'));
+      await PartiesController.getAll(req, res, next);
+      expect(next).toHaveBeenCalled();
+
+      jest.spyOn(PartiesService, 'getPartyById').mockRejectedValue(new Error('fail'));
+      await PartiesController.getById(req, res, next);
+      expect(next).toHaveBeenCalled();
+
+      jest.spyOn(PartiesService, 'createParty').mockRejectedValue(new Error('fail'));
+      await PartiesController.create(req, res, next);
+      expect(next).toHaveBeenCalled();
+
+      jest.spyOn(PartiesService, 'updateParty').mockRejectedValue(new Error('fail'));
+      await PartiesController.update(req, res, next);
+      expect(next).toHaveBeenCalled();
+    });
   });
 
   describe('InventoryController', () => {
@@ -100,6 +118,36 @@ describe('Controller Layer Unit Tests', () => {
       await InventoryController.getSummary(req, res, next);
       expect(res.status).toHaveBeenCalledWith(200);
     });
+
+    it('should forward errors to next for all inventory methods', async () => {
+      jest.spyOn(InventoryService, 'getLots').mockRejectedValue(new Error('fail'));
+      await InventoryController.getLots(req, res, next);
+      expect(next).toHaveBeenCalled();
+
+      jest.spyOn(InventoryService, 'getSingleDiamonds').mockRejectedValue(new Error('fail'));
+      await InventoryController.getSingleDiamonds(req, res, next);
+      expect(next).toHaveBeenCalled();
+
+      jest.spyOn(InventoryService, 'createLot').mockRejectedValue(new Error('fail'));
+      await InventoryController.createLot(req, res, next);
+      expect(next).toHaveBeenCalled();
+
+      jest.spyOn(InventoryService, 'createSingleDiamond').mockRejectedValue(new Error('fail'));
+      await InventoryController.createSingleDiamond(req, res, next);
+      expect(next).toHaveBeenCalled();
+
+      jest.spyOn(InventoryService, 'breakdownLot').mockRejectedValue(new Error('fail'));
+      await InventoryController.breakdownLot(req, res, next);
+      expect(next).toHaveBeenCalled();
+
+      jest.spyOn(InventoryService, 'recordStockAudit').mockRejectedValue(new Error('fail'));
+      await InventoryController.stockAudit(req, res, next);
+      expect(next).toHaveBeenCalled();
+
+      jest.spyOn(InventoryService, 'getStockSummary').mockRejectedValue(new Error('fail'));
+      await InventoryController.getSummary(req, res, next);
+      expect(next).toHaveBeenCalled();
+    });
   });
 
   describe('MemoController', () => {
@@ -121,6 +169,24 @@ describe('Controller Layer Unit Tests', () => {
       await MemoController.returnItem(req, res, next);
       expect(res.status).toHaveBeenCalledWith(200);
     });
+
+    it('should forward errors to next for memo methods', async () => {
+      jest.spyOn(MemoService, 'getAllMemos').mockRejectedValue(new Error('fail'));
+      await MemoController.getAll(req, res, next);
+      expect(next).toHaveBeenCalled();
+
+      jest.spyOn(MemoService, 'getMemoById').mockRejectedValue(new Error('fail'));
+      await MemoController.getById(req, res, next);
+      expect(next).toHaveBeenCalled();
+
+      jest.spyOn(MemoService, 'createMemo').mockRejectedValue(new Error('fail'));
+      await MemoController.create(req, res, next);
+      expect(next).toHaveBeenCalled();
+
+      jest.spyOn(MemoService, 'returnMemoItem').mockRejectedValue(new Error('fail'));
+      await MemoController.returnItem(req, res, next);
+      expect(next).toHaveBeenCalled();
+    });
   });
 
   describe('SalesController', () => {
@@ -136,6 +202,20 @@ describe('Controller Layer Unit Tests', () => {
       jest.spyOn(SalesService, 'getDebtorsAgeingAnalysis').mockResolvedValue({ total_outstanding: 0 } as any);
       await SalesController.getDebtorsAgeing(req, res, next);
       expect(res.status).toHaveBeenCalledWith(200);
+    });
+
+    it('should forward errors to next for sales methods', async () => {
+      jest.spyOn(SalesService, 'getAllSalesOrders').mockRejectedValue(new Error('fail'));
+      await SalesController.getAll(req, res, next);
+      expect(next).toHaveBeenCalled();
+
+      jest.spyOn(SalesService, 'createSalesOrder').mockRejectedValue(new Error('fail'));
+      await SalesController.create(req, res, next);
+      expect(next).toHaveBeenCalled();
+
+      jest.spyOn(SalesService, 'getDebtorsAgeingAnalysis').mockRejectedValue(new Error('fail'));
+      await SalesController.getDebtorsAgeing(req, res, next);
+      expect(next).toHaveBeenCalled();
     });
   });
 
@@ -153,6 +233,20 @@ describe('Controller Layer Unit Tests', () => {
       jest.spyOn(AccountingService, 'recordSupplierPayment').mockResolvedValue({} as any);
       await AccountingController.recordSupplierPayment(req, res, next);
       expect(res.status).toHaveBeenCalledWith(201);
+    });
+
+    it('should forward errors to next for accounting methods', async () => {
+      jest.spyOn(AccountingService, 'getPartyLedger').mockRejectedValue(new Error('fail'));
+      await AccountingController.getLedger(req, res, next);
+      expect(next).toHaveBeenCalled();
+
+      jest.spyOn(AccountingService, 'recordPaymentReceipt').mockRejectedValue(new Error('fail'));
+      await AccountingController.recordReceipt(req, res, next);
+      expect(next).toHaveBeenCalled();
+
+      jest.spyOn(AccountingService, 'recordSupplierPayment').mockRejectedValue(new Error('fail'));
+      await AccountingController.recordSupplierPayment(req, res, next);
+      expect(next).toHaveBeenCalled();
     });
   });
 
@@ -174,6 +268,24 @@ describe('Controller Layer Unit Tests', () => {
       await RemindersController.triggerDailyJob(req, res, next);
       expect(res.status).toHaveBeenCalledWith(200);
     });
+
+    it('should forward errors to next for reminders methods', async () => {
+      jest.spyOn(RemindersService, 'getDailyFollowUpQueue').mockRejectedValue(new Error('fail'));
+      await RemindersController.getDailyQueue(req, res, next);
+      expect(next).toHaveBeenCalled();
+
+      jest.spyOn(RemindersService, 'logFollowUp').mockRejectedValue(new Error('fail'));
+      await RemindersController.logFollowUp(req, res, next);
+      expect(next).toHaveBeenCalled();
+
+      jest.spyOn(RemindersService, 'updatePromisedDate').mockRejectedValue(new Error('fail'));
+      await RemindersController.updatePromisedDate(req, res, next);
+      expect(next).toHaveBeenCalled();
+
+      jest.spyOn(RemindersService, 'runDailyReminderJob').mockRejectedValue(new Error('fail'));
+      await RemindersController.triggerDailyJob(req, res, next);
+      expect(next).toHaveBeenCalled();
+    });
   });
 
   describe('ProcessingController', () => {
@@ -189,6 +301,20 @@ describe('Controller Layer Unit Tests', () => {
       jest.spyOn(ProcessingService, 'returnRepairItem').mockResolvedValue({ id: 'ret-1' } as any);
       await ProcessingController.returnItem(req, res, next);
       expect(res.status).toHaveBeenCalledWith(200);
+    });
+
+    it('should forward errors to next for processing methods', async () => {
+      jest.spyOn(ProcessingService, 'getAllSlips').mockRejectedValue(new Error('fail'));
+      await ProcessingController.getAll(req, res, next);
+      expect(next).toHaveBeenCalled();
+
+      jest.spyOn(ProcessingService, 'createRepairSlip').mockRejectedValue(new Error('fail'));
+      await ProcessingController.create(req, res, next);
+      expect(next).toHaveBeenCalled();
+
+      jest.spyOn(ProcessingService, 'returnRepairItem').mockRejectedValue(new Error('fail'));
+      await ProcessingController.returnItem(req, res, next);
+      expect(next).toHaveBeenCalled();
     });
   });
 });

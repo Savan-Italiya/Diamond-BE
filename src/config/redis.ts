@@ -43,8 +43,9 @@ class RedisService {
   }
 
   public async get(key: string): Promise<string | null> {
+    if (config.env === 'test') return null;
     try {
-      if (!this.isConnected && config.env === 'test') return null;
+      if (!this.isConnected) return null;
       return await this.client.get(key);
     } catch {
       return null;
@@ -52,8 +53,9 @@ class RedisService {
   }
 
   public async set(key: string, value: string, ttlSeconds?: number): Promise<void> {
+    if (config.env === 'test') return;
     try {
-      if (!this.isConnected && config.env === 'test') return;
+      if (!this.isConnected) return;
       if (ttlSeconds) {
         await this.client.setex(key, ttlSeconds, value);
       } else {
@@ -65,8 +67,9 @@ class RedisService {
   }
 
   public async del(key: string): Promise<void> {
+    if (config.env === 'test') return;
     try {
-      if (!this.isConnected && config.env === 'test') return;
+      if (!this.isConnected) return;
       await this.client.del(key);
     } catch (err) {
       console.warn('Redis del error:', err);
@@ -74,6 +77,7 @@ class RedisService {
   }
 
   public async flush(): Promise<void> {
+    if (config.env === 'test') return;
     try {
       await this.client.flushall();
     } catch {

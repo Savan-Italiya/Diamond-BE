@@ -34,4 +34,8 @@ router.post(
   RemindersController.triggerDailyJob
 );
 
+router.get('/history',           RemindersController.getFollowUpHistory);
+router.post('/:schedule_id/done', RemindersController.markCallDone);
+router.get('/dashboard-stats',   RemindersController.getDashboardStats);
+
 export default router;

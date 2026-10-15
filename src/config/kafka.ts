@@ -36,6 +36,7 @@ class KafkaService {
   }
 
   public async getProducer(): Promise<Producer | null> {
+    if (config.env === 'test') return null;
     if (this.producer) return this.producer;
     try {
       this.producer = this.kafka.producer();
@@ -85,6 +86,7 @@ class KafkaService {
     handler: (message: Record<string, any>) => Promise<void>
   ): Promise<void> {
     this.handlers.set(topic, handler);
+    if (config.env === 'test') return;
     try {
       if (!this.consumer) {
         this.consumer = this.kafka.consumer({ groupId: config.kafka.groupId });

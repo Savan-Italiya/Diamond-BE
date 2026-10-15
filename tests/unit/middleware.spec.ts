@@ -151,6 +151,23 @@ describe('Backend Middleware Unit Tests', () => {
         })
       );
     });
+
+    it('should validate query and params schemas successfully', async () => {
+      req.query = { name: 'Parcel A', carat: 5 };
+      req.params = { name: 'Parcel B', carat: 10 };
+      const middleware = validateRequest({ query: testSchema, params: testSchema });
+      await middleware(req, res, next);
+      expect(next).toHaveBeenCalled();
+    });
+
+    it('should forward non-ZodError to next', async () => {
+      const faultySchema: any = {
+        parseAsync: jest.fn().mockRejectedValue(new Error('Fatal schema exception'))
+      };
+      const middleware = validateRequest({ body: faultySchema });
+      await middleware(req, res, next);
+      expect(next).toHaveBeenCalledWith(expect.any(Error));
+    });
   });
 
   describe('Audit Logger Middleware', () => {

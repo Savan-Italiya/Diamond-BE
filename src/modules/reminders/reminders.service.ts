@@ -1,6 +1,7 @@
 import { db } from '../../database/connection';
 import { redisService } from '../../config/redis';
 import { kafkaService, KafkaTopics } from '../../config/kafka';
+import { NotificationsService } from '../notifications/notifications.service';
 
 export class RemindersService {
   public static async getDailyFollowUpQueue() {
@@ -106,6 +107,16 @@ export class RemindersService {
           whatsapp_url: item.whatsapp_app_url
         });
 
+        // Dispatch SMS to registered mobile number
+        const smsMessage = `Payment Reminder: ₹${Number(item.amount_due).toLocaleString('en-IN')} for Invoice #${item.invoice_number} is pending. Please transfer to Bharat Diamond Bourse bank account. - BKC Desk`;
+        await NotificationsService.sendSmsNotification({
+          party_id: item.party_id,
+          phone: item.phone_primary,
+          message: smsMessage,
+          reference_type: 'PAYMENT_REMINDER',
+          reference_id: item.schedule_id
+        });
+
         count++;
       }
     }
@@ -114,5 +125,119 @@ export class RemindersService {
     await redisService.set('diamond:reminders:daily_queue', JSON.stringify(queue), 3600);
 
     return count;
+  }
+
+  public static async getFollowUpHistory(partyId?: string, limit = 50) {
+    let q = db('follow_up_logs')
+      .leftJoin('parties', 'follow_up_logs.party_id', 'parties.id')
+      .leftJoin('users', 'follow_up_logs.caller_user_id', 'users.id')
+      .select(
+        'follow_up_logs.*',
+        'parties.business_name',
+        'parties.owner_name',
+        'users.name as caller_name'
+      )
+      .orderBy('follow_up_logs.created_at', 'desc')
+      .limit(limit);
+    if (partyId) q = q.where('follow_up_logs.party_id', partyId);
+    return q;
+  }
+
+  public static async markCallDone(scheduleId: string, data: {
+    resolution: 'PAID' | 'PROMISED' | 'RESCHEDULED' | 'NO_ANSWER' | 'DISPUTED';
+    note?: string;
+    next_date?: string;
+    caller_user_id?: string;
+  }) {
+    // Update schedule status
+    const statusMap: Record<string, string> = {
+      PAID: 'PAID',
+      PROMISED: 'PROMISED',
+      RESCHEDULED: 'PROMISED',
+      NO_ANSWER: 'OVERDUE',
+      DISPUTED: 'OVERDUE'
+    };
+    const newStatus = statusMap[data.resolution] || 'OVERDUE';
+
+    await db('payment_schedules').where({ id: scheduleId }).update({
+      status: newStatus,
+      promised_date: data.next_date || null,
+      updated_at: new Date()
+    });
+
+    // Insert call log
+    const [log] = await db('follow_up_logs').insert({
+      party_id: (await db('payment_schedules').where({ id: scheduleId }).select('party_id').first())?.party_id,
+      call_date: new Date().toISOString().split('T')[0],
+      caller_user_id: data.caller_user_id || null,
+      client_response: `[${data.resolution}] ${data.note || ''}`.trim(),
+      next_follow_up_date: data.next_date || null,
+      created_at: new Date()
+    }).returning('*');
+
+    return { schedule_updated: newStatus, log };
+  }
+
+  public static async getDashboardStats() {
+    const today = new Date();
+    const thisMonthStart = new Date(today.getFullYear(), today.getMonth(), 1).toISOString().split('T')[0];
+    const todayStr = today.toISOString().split('T')[0];
+
+    // Collection this month
+    const collectedMonth = await db('payment_receipts')
+      .where('receipt_date', '>=', thisMonthStart)
+      .sum('amount_received as total')
+      .first();
+
+    // Pending count
+    const pendingCount = await db('payment_schedules')
+      .whereIn('status', ['PENDING', 'OVERDUE'])
+      .count('id as cnt')
+      .first();
+
+    // Today's calls done
+    const callsDone = await db('follow_up_logs')
+      .where('call_date', todayStr)
+      .count('id as cnt')
+      .first();
+
+    // Top buyers by sales volume (last 90 days)
+    const ninetyDaysAgo = new Date(Date.now() - 90 * 86400000).toISOString().split('T')[0];
+    const topBuyers = await db('sales_orders')
+      .join('parties', 'sales_orders.buyer_id', 'parties.id')
+      .where('sales_orders.created_at', '>=', ninetyDaysAgo)
+      .whereNotIn('sales_orders.deal_status', ['CANCELLED'])
+      .select('parties.business_name as name')
+      .sum('sales_orders.net_amount as total_amount')
+      .count('sales_orders.id as deal_count')
+      .groupBy('parties.id', 'parties.business_name')
+      .orderBy('total_amount', 'desc')
+      .limit(8);
+
+    // Follow-up counts per buyer (reliability score)
+    const followUpCounts = await db('follow_up_logs')
+      .join('parties', 'follow_up_logs.party_id', 'parties.id')
+      .select('parties.business_name as name')
+      .count('follow_up_logs.id as follow_up_count')
+      .groupBy('parties.id', 'parties.business_name')
+      .orderBy('follow_up_count', 'desc')
+      .limit(8);
+
+    // Monthly collection trend (last 6 months)
+    const monthlyTrend = await db('payment_receipts')
+      .select(db.raw(`to_char(receipt_date, 'YYYY-MM') as month`))
+      .sum('amount_received as collected')
+      .groupByRaw(`to_char(receipt_date, 'YYYY-MM')`)
+      .orderBy('month', 'asc')
+      .limit(6);
+
+    return {
+      collected_this_month: Number(collectedMonth?.total || 0),
+      pending_follow_ups: Number(pendingCount?.cnt || 0),
+      calls_done_today: Number(callsDone?.cnt || 0),
+      top_buyers: topBuyers,
+      follow_up_counts: followUpCounts,
+      monthly_trend: monthlyTrend
+    };
   }
 }

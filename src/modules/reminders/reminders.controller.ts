@@ -42,4 +42,30 @@ export class RemindersController {
       next(err);
     }
   }
+
+  public static async getFollowUpHistory(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const { party_id, limit } = req.query as Record<string, string>;
+      const logs = await RemindersService.getFollowUpHistory(party_id, limit ? parseInt(limit) : 50);
+      res.json({ success: true, data: logs });
+    } catch (err) { next(err); }
+  }
+
+  public static async markCallDone(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const { schedule_id } = req.params;
+      const result = await RemindersService.markCallDone(schedule_id, {
+        ...req.body,
+        caller_user_id: req.user?.userId
+      });
+      res.json({ success: true, data: result });
+    } catch (err) { next(err); }
+  }
+
+  public static async getDashboardStats(_req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const stats = await RemindersService.getDashboardStats();
+      res.json({ success: true, data: stats });
+    } catch (err) { next(err); }
+  }
 }

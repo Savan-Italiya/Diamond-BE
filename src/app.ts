@@ -13,6 +13,8 @@ import accountingRouter from './modules/accounting/accounting.router';
 import remindersRouter from './modules/reminders/reminders.router';
 import notificationsRouter from './modules/notifications/notifications.router';
 import auditRouter from './modules/audit/audit.router';
+import organizationsRouter from './modules/organizations/organizations.router';
+import expensesRouter from './modules/expenses/expenses.router';
 
 import { errorHandler } from './middleware/error.middleware';
 
@@ -56,6 +58,8 @@ export function createApp(): Application {
   app.use('/api/v1/reminders', remindersRouter);
   app.use('/api/v1/notifications', notificationsRouter);
   app.use('/api/v1/audit', auditRouter);
+  app.use('/api/v1/organizations', organizationsRouter);
+  app.use('/api/v1/expenses', expensesRouter);
 
   // 404 Route Handler
   app.use((req: Request, res: Response) => {
