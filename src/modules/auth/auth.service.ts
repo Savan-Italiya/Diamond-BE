@@ -38,7 +38,9 @@ export class AuthService {
       name: user.name,
       email: user.email,
       roles: roleNames,
-      permissions: permissionCodes
+      permissions: permissionCodes,
+      organization_id: user.organization_id || null,
+      user_scope: user.user_scope || 'INDIVIDUAL'
     };
 
     const token = jwt.sign(payload, config.jwt.secret, {
