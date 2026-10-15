@@ -77,33 +77,53 @@ class KafkaService {
       return false;
     }
   }
+  private handlers: Map<string, (message: Record<string, any>) => Promise<void>> = new Map();
+  private isConsumerRunning = false;
 
   public async registerConsumer(
     topic: KafkaTopics,
     handler: (message: Record<string, any>) => Promise<void>
   ): Promise<void> {
+    this.handlers.set(topic, handler);
     try {
       if (!this.consumer) {
         this.consumer = this.kafka.consumer({ groupId: config.kafka.groupId });
         await this.consumer.connect();
       }
 
-      await this.consumer.subscribe({ topic, fromBeginning: false });
+      if (!this.isConsumerRunning) {
+        await this.consumer.subscribe({ topic, fromBeginning: false });
+      }
+    } catch (err: any) {
+      if (config.env !== 'test') {
+        console.warn(`Kafka Consumer subscribe skipped for topic ${topic}:`, err.message);
+      }
+    }
+  }
+
+  public async startConsumers(): Promise<void> {
+    if (!this.consumer || this.isConsumerRunning) return;
+    try {
+      this.isConsumerRunning = true;
       await this.consumer.run({
-        eachMessage: async ({ message }) => {
+        eachMessage: async ({ topic, message }) => {
           if (message.value) {
             try {
               const data = JSON.parse(message.value.toString());
-              await handler(data);
+              const handler = this.handlers.get(topic);
+              if (handler) {
+                await handler(data);
+              }
             } catch (e) {
-              console.error('Error handling Kafka message:', e);
+              console.error(`Error handling Kafka message on topic ${topic}:`, e);
             }
           }
         }
       });
+      console.log('✅ Kafka Consumer loop successfully running for registered topics');
     } catch (err: any) {
       if (config.env !== 'test') {
-        console.warn(`Kafka Consumer registration skipped for topic ${topic}:`, err.message);
+        console.warn('Kafka Consumer start skipped:', err.message);
       }
     }
   }

@@ -44,4 +44,7 @@ export async function initKafkaConsumers(): Promise<void> {
         .update({ status: 'SENT' });
     }
   });
+
+  // Start consumer loop for all subscribed topics
+  await kafkaService.startConsumers();
 }

@@ -43,11 +43,13 @@ const knexConfig: { [key: string]: Knex.Config } = {
     migrations: {
       directory: path.resolve(__dirname, './migrations'),
       extension: 'js',
+      loadExtensions: ['.js'],
       tableName: 'knex_migrations'
     },
     seeds: {
       directory: path.resolve(__dirname, './seeds'),
-      extension: 'js'
+      extension: 'js',
+      loadExtensions: ['.js']
     }
   },
   test: {

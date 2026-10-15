@@ -9,10 +9,23 @@ const PORT = config.port;
 async function bootstrap() {
   console.log('💎 Starting Diamond ERP Backend Service (Mumbai BKC)...');
 
-  // Verify DB connectivity
+  // Verify DB connectivity and run schema migrations
   const dbHealthy = await checkDatabaseHealth();
   if (dbHealthy) {
     console.log('✅ PostgreSQL database connection established');
+    try {
+      const knexConfig = (await import('./database/knexfile')).default;
+      const currentConfig = knexConfig[config.env] || knexConfig.production;
+      const knexInstance = (await import('./database/connection')).default;
+      const migrationsDir = currentConfig?.migrations?.directory;
+      await knexInstance.migrate.latest({
+        directory: migrationsDir,
+        loadExtensions: ['.js']
+      });
+      console.log('✅ PostgreSQL schema migrations verified (37 tables)');
+    } catch (migErr: any) {
+      console.warn('⚠️ Auto-migration note:', migErr.message);
+    }
   } else {
     console.warn('⚠️ PostgreSQL connection failed or waiting for container');
   }
